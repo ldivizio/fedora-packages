@@ -51,6 +51,7 @@ highlighting, autosuggestions, and tab completions that just work, with
 nothing to learn or configure.
 
 %prep
+%autosetup -n fish-shell-%{version}
 
 # For forked pcre2 crate that includes https://github.com/BurntSushi/rust-pcre2/pull/38
 mkdir -p ./third-party-forks/rust-pcre2
@@ -67,7 +68,7 @@ done
 %cargo_generate_buildrequires -t
 
 
-%conf
+%build
 %cmake -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DBUILD_DOCS=OFF \
     -DCMAKE_INSTALL_SYSCONFDIR=%{_sysconfdir} \
