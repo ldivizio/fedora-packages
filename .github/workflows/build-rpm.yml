@@ -1,0 +1,78 @@
+name: Build RPM
+
+on:
+    push:
+        tags:
+            - '*/v*'
+
+jobs:
+    build-rpm:
+        name: Build RPM for Fedora 43
+        runs-on: ubuntu-latest
+        container:
+            image: fedora:43
+        # Map step outputs to job outputs so the release job can see them
+        outputs:
+            package: ${{ steps.vars.outputs.package }}
+            version: ${{ steps.vars.outputs.version }}
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Parse package tag
+              id: vars
+              run: |
+                TAG_NAME=${GITHUB_REF#refs/tags/}
+                echo "package=$(echo $TAG_NAME | cut -d'/' -f1)" >> $GITHUB_OUTPUT
+                echo "version=$(echo $TAG_NAME | cut -d'/v' -f2)" >> $GITHUB_OUTPUT
+
+            - name: Install build dependencies
+              run: |
+                  dnf install -qy --setopt install_weak_deps=False rpm-build rpmdevtools tar dnf-plugins-core
+
+            - name: Setup RPM build environment
+              run: |
+                  # Note: In containers, HOME is usually /root
+                  rpmdev-setuptree
+
+            - name: Copy SPEC and Sources
+              run: |
+                  PKG_DIR="${{ steps.vars.outputs.package }}"
+                  cp "$PKG_DIR/$PKG_DIR.spec" ~/rpmbuild/SPECS/
+
+            - name: Install build dependencies from SPEC
+              run: |
+                  dnf builddep -y ~/rpmbuild/SPECS/${{ steps.vars.outputs.package }}.spec
+
+            - name: Build RPM
+              run: |
+                  # Pass version/release into rpmbuild if your SPEC uses %{?version}
+                  rpmbuild -bb ~/rpmbuild/SPECS/${{ steps.vars.outputs.package }}.spec
+
+            - name: Upload RPM artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  # Fixed: replaced missing matrix var with static f43
+                  name: "${{ steps.vars.outputs.package }}-${{ steps.vars.outputs.version }}-fc43"
+                  path: ~/rpmbuild/RPMS/**/*.rpm
+                  if-no-files-found: error
+
+    release:
+        name: Publish Release
+        runs-on: ubuntu-latest
+        needs: build-rpm
+        steps:
+            - name: Download all RPM artifacts
+              uses: actions/download-artifact@v4
+              with:
+                  path: dist
+
+            - name: Create GitHub Release
+              uses: softprops/action-gh-release@v2
+              with:
+                  # Use the job outputs from build-rpm
+                  name: "${{ needs.build-rpm.outputs.package }} ${{ needs.build-rpm.outputs.version }}"
+                  files: dist/**/*.rpm
+                  fail_on_unmatched_files: true
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
